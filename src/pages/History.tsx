@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -12,16 +12,26 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/common/Button';
 import { Card, CardContent, CardHeader } from '@/components/common/Card';
-import { getTasks, deleteTask, retryTask } from '@/utils/api';
+import { getTasks, deleteTask, retryTask, getImageUrl } from '@/utils/api';
 import { useTaskStore } from '@/store/useTaskStore';
 import { formatDate, formatFileSize, getStatusText, getStatusColor, getStatusBgColor } from '@/utils/format';
-import type { RepairTask, TaskStatus } from '@/types';
-import { getImageUrl } from '@/utils/api';
+import type { RepairTask, TaskStatus, RepairMode } from '@/types';
+
+const REPAIR_MODE_LABELS: Record<RepairMode, string> = {
+  scratch: '划痕去除',
+  damage: '破损补全',
+  enhance: '高清放大',
+  colorize: '智能上色',
+  comprehensive: '综合修复',
+};
+
+const ALL_STATUSES: Array<TaskStatus | 'all'> = ['all', 'pending', 'queued', 'processing', 'paused', 'completed', 'failed'];
 
 const History: React.FC = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
+  const [repairTypeFilter, setRepairTypeFilter] = useState<RepairMode | 'all'>('all');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
 
@@ -37,11 +47,7 @@ const History: React.FC = () => {
   const loadTasks = async () => {
     setIsLoading(true);
     try {
-      const params: any = { limit: 100 };
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (searchQuery) params.search = searchQuery;
-
-      const { list } = await getTasks(params);
+      const { list } = await getTasks({ limit: 500 });
       setTasks(list);
     } catch (e) {
       console.error('Load tasks failed:', e);
@@ -52,11 +58,15 @@ const History: React.FC = () => {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    loadTasks();
   };
 
   const handleStatusChange = (status: TaskStatus | 'all') => {
     setStatusFilter(status);
+    setSelectedTasks(new Set());
+  };
+
+  const handleRepairTypeChange = (mode: RepairMode | 'all') => {
+    setRepairTypeFilter(mode);
     setSelectedTasks(new Set());
   };
 
@@ -119,13 +129,44 @@ const History: React.FC = () => {
     }
   };
 
-  const filteredTasks = tasks.filter((task) => {
-    if (statusFilter !== 'all' && task.status !== statusFilter) return false;
-    if (searchQuery && !task.image.originalName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (statusFilter !== 'all' && task.status !== statusFilter) return false;
+      if (repairTypeFilter !== 'all' && !task.options.modes.includes(repairTypeFilter)) return false;
+      if (searchQuery && !task.image.originalName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+  }, [tasks, statusFilter, repairTypeFilter, searchQuery]);
 
-  const completedTasks = filteredTasks.filter((t) => t.status === 'completed');
+  const completedTasks = useMemo(
+    () => filteredTasks.filter((t) => t.status === 'completed'),
+    [filteredTasks]
+  );
+
+  const handleDownload = async (task: RepairTask) => {
+    if (!task.processedUrl) {
+      alert('该任务尚未完成，暂无下载文件');
+      return;
+    }
+    try {
+      const filename = task.processedUrl.split('/').pop()!;
+      const url = getImageUrl(filename, 'processed');
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      const originalBaseName = task.image.originalName.replace(/\.[^/.]+$/, '');
+      link.download = `${originalBaseName}_修复后.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (e) {
+      console.error('Download failed:', e);
+      alert('下载失败，请稍后重试');
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -180,8 +221,8 @@ const History: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-[#F5EDE0]/50" />
-                <div className="flex gap-1">
-                  {(['all', 'pending', 'processing', 'completed', 'failed'] as const).map((status) => (
+                <div className="flex gap-1 flex-wrap">
+                  {ALL_STATUSES.map((status) => (
                     <button
                       key={status}
                       onClick={() => handleStatusChange(status)}
@@ -192,6 +233,25 @@ const History: React.FC = () => {
                       }`}
                     >
                       {status === 'all' ? '全部' : getStatusText(status)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#F5EDE0]/50">修复类型:</span>
+                <div className="flex gap-1 flex-wrap">
+                  {(['all', 'scratch', 'damage', 'enhance', 'colorize', 'comprehensive'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => handleRepairTypeChange(mode)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        repairTypeFilter === mode
+                          ? 'bg-[#8B5CF6] text-white'
+                          : 'bg-white/5 text-[#F5EDE0]/70 hover:bg-white/10'
+                      }`}
+                    >
+                      {mode === 'all' ? '全部' : REPAIR_MODE_LABELS[mode]}
                     </button>
                   ))}
                 </div>
@@ -232,6 +292,7 @@ const History: React.FC = () => {
                   onPreview={() => navigate(`/preview/${task.id}`)}
                   onDelete={() => handleDelete(task.id)}
                   onRetry={() => handleRetry(task.id)}
+                  onDownload={() => handleDownload(task)}
                 />
               ))}
             </div>
@@ -249,6 +310,7 @@ interface TaskCardProps {
   onPreview: () => void;
   onDelete: () => void;
   onRetry: () => void;
+  onDownload: () => void;
 }
 
 const TaskCard: React.FC<TaskCardProps> = ({
@@ -258,6 +320,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   onPreview,
   onDelete,
   onRetry,
+  onDownload,
 }) => {
   return (
     <div
@@ -336,17 +399,38 @@ const TaskCard: React.FC<TaskCardProps> = ({
           </span>
           <span>{formatFileSize(task.image.size)}</span>
         </div>
+        <div className="flex flex-wrap gap-1 mt-2">
+          {task.options.modes.map((mode) => (
+            <span
+              key={mode}
+              className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#8B5CF6]/20 text-[#A78BFA] border border-[#8B5CF6]/30"
+            >
+              {REPAIR_MODE_LABELS[mode]}
+            </span>
+          ))}
+        </div>
         <div className="flex items-center gap-2 mt-3">
           {task.status === 'completed' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Download className="w-4 h-4" />}
-              onClick={onPreview}
-              className="flex-1"
-            >
-              下载
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Eye className="w-4 h-4" />}
+                onClick={onPreview}
+                className="flex-1"
+              >
+                查看
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Download className="w-4 h-4" />}
+                onClick={onDownload}
+                className="flex-1"
+              >
+                下载
+              </Button>
+            </>
           )}
           <Button
             variant="ghost"
