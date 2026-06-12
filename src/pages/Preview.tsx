@@ -38,6 +38,7 @@ const Preview: React.FC = () => {
   const [exportUrl, setExportUrl] = useState<string | null>(null);
   const [sliderPosition, setSliderPosition] = useState(50);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const compareContainerRef = useRef<HTMLDivElement>(null);
 
   const updateTask = useTaskStore((state) => state.updateTask);
 
@@ -266,12 +267,16 @@ const Preview: React.FC = () => {
               </h3>
             </CardHeader>
             <CardContent>
-              <div className="relative overflow-hidden rounded-lg bg-[#0f0905] aspect-[4/3] max-h-[600px]">
+              <div
+                ref={compareContainerRef}
+                className="relative overflow-hidden rounded-lg bg-[#0f0905] aspect-[4/3] max-h-[600px]"
+              >
                 <div className="absolute inset-0">
                   <img
                     src={getImageUrl(task.image.filename)}
                     alt="修复前"
                     className="w-full h-full object-contain"
+                    draggable={false}
                   />
                 </div>
                 <div
@@ -282,13 +287,14 @@ const Preview: React.FC = () => {
                     src={task.processedUrl ? getImageUrl(processedFilename!, 'processed') : ''}
                     alt="修复后"
                     className="w-full h-full object-contain"
+                    draggable={false}
                   />
                 </div>
                 <div
-                  className="absolute top-0 bottom-0 w-1 bg-[#C9A962] cursor-ew-resize"
+                  className="absolute top-0 bottom-0 w-1 bg-[#C9A962] cursor-ew-resize pointer-events-none"
                   style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
                 >
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[#C9A962] rounded-full flex items-center justify-center shadow-lg">
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[#C9A962] rounded-full flex items-center justify-center shadow-lg pointer-events-auto">
                     <div className="flex gap-0.5">
                       <div className="w-0.5 h-3 bg-[#2D1B0E] rounded" />
                       <div className="w-0.5 h-3 bg-[#2D1B0E] rounded" />
@@ -298,8 +304,11 @@ const Preview: React.FC = () => {
                 <div
                   className="absolute inset-y-0 w-full cursor-ew-resize"
                   onMouseDown={(e) => {
+                    e.preventDefault();
+                    const container = compareContainerRef.current;
+                    if (!container) return;
                     const handleMove = (moveEvent: MouseEvent) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
+                      const rect = container.getBoundingClientRect();
                       const x = moveEvent.clientX - rect.left;
                       const percent = Math.max(0, Math.min(100, (x / rect.width) * 100));
                       setSliderPosition(percent);

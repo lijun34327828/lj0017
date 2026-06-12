@@ -5,89 +5,100 @@ export async function simulateAIRepair(
   originalBuffer: Buffer,
   options: RepairOptions,
   preprocess: PreprocessConfig,
-  onProgress: (progress: number, message: string) => void
+  onProgress: (progress: number, message: string) => Promise<void> | void
 ): Promise<Buffer> {
   const totalSteps = options.modes.length + 1;
   let currentStep = 0;
 
-  onProgress(5, '正在加载图像...');
-  await delay(500);
+  await onProgress(5, '正在加载图像...');
+  await delay(500, onProgress);
 
   let image = sharp(originalBuffer);
 
   if (preprocess.rotation !== 0) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 20 + 10), '正在应用旋转...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 20 + 10), '正在应用旋转...');
     image = image.rotate(preprocess.rotation);
-    await delay(300);
+    await delay(300, onProgress);
   }
 
   if (preprocess.crop) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 20 + 10), '正在裁剪图像...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 20 + 10), '正在裁剪图像...');
     const { x, y, width, height } = preprocess.crop;
     image = image.extract({ left: x, top: y, width, height });
-    await delay(300);
+    await delay(300, onProgress);
   }
 
   if (preprocess.spotRemoval && preprocess.spotRemoval.length > 0) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 20 + 10), '正在去除污点...');
-    await delay(400);
+    await onProgress(Math.floor((currentStep / totalSteps) * 20 + 10), '正在去除污点...');
+    await delay(400, onProgress);
   }
 
   let buffer = await image.toBuffer();
 
   if (options.modes.includes('scratch')) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在去除划痕...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在去除划痕...');
     buffer = await simulateScratchRemoval(buffer);
-    await delay(800);
+    await delay(800, onProgress);
   }
 
   if (options.modes.includes('damage')) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在修补破损区域...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在修补破损区域...');
     buffer = await simulateDamageRepair(buffer);
-    await delay(1000);
+    await delay(1000, onProgress);
   }
 
   if (options.modes.includes('enhance')) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在高清放大...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在高清放大...');
     buffer = await simulateEnhancement(buffer, options.upscaleFactor);
-    await delay(1200);
+    await delay(1200, onProgress);
   }
 
   if (options.modes.includes('colorize')) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在智能上色...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在智能上色...');
     buffer = await simulateColorization(buffer, options.colorizationStyle || 'natural');
-    await delay(1500);
+    await delay(1500, onProgress);
   }
 
   if (options.modes.includes('comprehensive')) {
     currentStep++;
-    onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在进行综合修复...');
+    await onProgress(Math.floor((currentStep / totalSteps) * 80 + 10), '正在进行综合修复...');
     buffer = await simulateComprehensiveRepair(buffer, options);
-    await delay(2000);
+    await delay(2000, onProgress);
   }
 
   if (options.preserveStyle) {
-    onProgress(90, '正在保留原始光影风格...');
+    await onProgress(90, '正在保留原始光影风格...');
     buffer = await preserveOriginalStyle(buffer, originalBuffer);
-    await delay(500);
+    await delay(500, onProgress);
   }
 
-  onProgress(95, '正在生成最终图像...');
-  await delay(300);
+  await onProgress(95, '正在生成最终图像...');
+  await delay(300, onProgress);
 
-  onProgress(100, '修复完成！');
+  await onProgress(100, '修复完成！');
   return buffer;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function delay(
+  ms: number,
+  onProgress?: (progress: number, message: string) => Promise<void> | void
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const remaining = ms - (Date.now() - start);
+    const step = Math.min(remaining, 100);
+    await new Promise((resolve) => setTimeout(resolve, step));
+    if (onProgress) {
+      await onProgress(-1, '');
+    }
+  }
 }
 
 async function simulateScratchRemoval(buffer: Buffer): Promise<Buffer> {

@@ -9,6 +9,8 @@ interface QueueItem {
   task: RepairTask;
   isPaused: boolean;
   abortController: AbortController;
+  resumeResolver: (() => void) | null;
+  resumePromise: Promise<void> | null;
 }
 
 const taskQueue: QueueItem[] = [];
@@ -21,6 +23,8 @@ export function addToQueue(task: RepairTask) {
     task,
     isPaused: false,
     abortController: new AbortController(),
+    resumeResolver: null,
+    resumePromise: null,
   };
   taskQueue.push(item);
   updateTaskStatus(task.id, 'queued', 0, '等待处理...');
@@ -38,6 +42,11 @@ export function pauseTask(taskId: string): boolean {
   const processing = processingTasks.get(taskId);
   if (processing) {
     processing.isPaused = true;
+    let resolver: (() => void) | null = null;
+    processing.resumePromise = new Promise<void>((resolve) => {
+      resolver = resolve;
+    });
+    processing.resumeResolver = resolver;
     updateTaskStatus(taskId, 'paused', processing.task.progress, '已暂停');
     broadcastProgress({
       type: 'progress',
@@ -70,6 +79,11 @@ export function resumeTask(taskId: string): boolean {
   const processing = processingTasks.get(taskId);
   if (processing && processing.isPaused) {
     processing.isPaused = false;
+    if (processing.resumeResolver) {
+      processing.resumeResolver();
+      processing.resumeResolver = null;
+      processing.resumePromise = null;
+    }
     updateTaskStatus(taskId, 'processing', processing.task.progress, '继续处理...');
     broadcastProgress({
       type: 'progress',
@@ -104,6 +118,8 @@ export function retryTask(task: RepairTask) {
     task: { ...task, status: 'pending', progress: 0, progressMessage: '重试中...' },
     isPaused: false,
     abortController: new AbortController(),
+    resumeResolver: null,
+    resumePromise: null,
   };
   taskQueue.push(item);
   updateTaskStatus(task.id, 'queued', 0, '等待处理...');
@@ -159,12 +175,15 @@ async function processTask(item: QueueItem) {
       originalBuffer,
       task.options,
       task.preprocess,
-      (progress, message) => {
-        if (item.isPaused) {
-          return;
+      async (progress, message) => {
+        while (item.isPaused && item.resumePromise) {
+          await item.resumePromise;
         }
+        if (progress < 0) return;
         if (progress > lastProgress) {
           lastProgress = progress;
+          item.task.progress = progress;
+          item.task.progressMessage = message;
           updateTaskStatus(task.id, 'processing', progress, message);
           broadcastProgress({
             type: 'progress',
@@ -176,10 +195,6 @@ async function processTask(item: QueueItem) {
         }
       }
     );
-
-    if (item.isPaused) {
-      return;
-    }
 
     const processedFilename = await saveProcessedImage(task.id, resultBuffer, 'png');
     const processedUrl = `/api/processed/${processedFilename}`;
